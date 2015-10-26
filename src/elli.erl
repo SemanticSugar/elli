@@ -16,6 +16,8 @@
          get_acceptors/1,
          get_open_reqs/1,
          get_open_reqs/2,
+         get_total_reqs/1,
+         get_total_reqs/2,
          set_callback/3
         ]).
 
@@ -29,6 +31,7 @@
 -record(state, {socket :: elli_tcp:socket(),
                 acceptors :: non_neg_integer(),
                 open_reqs :: non_neg_integer(),
+                total_reqs :: non_neg_integer(),
                 options :: [{_, _}],
                 callback :: callback()
 }).
@@ -59,13 +62,18 @@ get_open_reqs(S) ->
 get_open_reqs(S, Timeout) ->
     gen_server:call(S, get_open_reqs, Timeout).
 
+get_total_reqs(S) ->
+    get_total_reqs(S, 5000).
+
+get_total_reqs(S, Timeout) ->
+    gen_server:call(S, get_total_reqs, Timeout).
+
 set_callback(S, Callback, CallbackArgs) ->
     valid_callback(Callback) orelse throw(invalid_callback),
     gen_server:call(S, {set_callback, Callback, CallbackArgs}).
 
 stop(S) ->
     gen_server:call(S, stop).
-
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -127,6 +135,7 @@ init([Opts]) ->
     {ok, #state{socket = Socket,
                 acceptors = Acceptors,
                 open_reqs = 0,
+                total_reqs = MinAcceptors,
                 options = Options,
                 callback = {Callback, CallbackArgs}}}.
 
@@ -137,6 +146,9 @@ handle_call(get_acceptors, _From, State) ->
 
 handle_call(get_open_reqs, _From, State) ->
     {reply, {ok, State#state.open_reqs}, State};
+
+handle_call(get_total_reqs, _From, State) ->
+    {reply, {ok, State#state.total_reqs}, State};
 
 handle_call({set_callback, Callback, CallbackArgs}, _From, State) ->
     ok = Callback:handle_event(elli_reconfigure, [], CallbackArgs),
@@ -177,13 +189,15 @@ code_change(_OldVsn, State, _Extra) ->
 
 remove_acceptor(State, Pid) ->
     ets:delete(State#state.acceptors, Pid),
-    State#state{open_reqs = State#state.open_reqs - 1}.
+    State#state{open_reqs = State#state.open_reqs - 1,
+                total_reqs = State#state.total_reqs - 1}.
 
 start_add_acceptor(State) ->
     Pid = elli_http:start_link(self(), State#state.socket,
                                State#state.options, State#state.callback),
     ets:insert(State#state.acceptors, {Pid}),
-    State#state{open_reqs = State#state.open_reqs + 1}.
+    State#state{open_reqs = State#state.open_reqs + 1,
+                total_reqs = State#state.total_reqs + 1}.
 
 
 required_opt(Name, Opts) ->
